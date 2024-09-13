@@ -3,10 +3,9 @@ import pandas as pd
 import streamlit as st
 import sqlite3
 import logging
-import time
 
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import HNSWLib  # Replace with HyperDB if available
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
@@ -19,14 +18,11 @@ import langchain
 # Set up caching for embeddings to prevent redundant computations
 langchain.llm_cache = SQLiteCache(database_path=".langchain_cache.db")
 
-# Set API key using Streamlit secrets
-openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+# Initialize embeddings using Hugging Face's 'all-MiniLM-L6-v2' model
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# Initialize Langchain components (no batch_size parameter here)
-embeddings = OpenAIEmbeddings(
-    openai_api_key=openai_api_key,
-    model="text-embedding-ada-002"
-)
+# Initialize the language model (e.g., OpenAI's GPT-4)
+openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
 
 llm = ChatOpenAI(
     openai_api_key=openai_api_key,
@@ -60,16 +56,18 @@ def load_document(file):
     else:
         return file.read().decode('utf-8')
 
-# Function to create the FAISS vector store with optimizations
+# Function to create the vector store with the new embeddings
 def create_vector_store(documents):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=8000, chunk_overlap=0)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     texts = []
     for document in documents:
         splits = text_splitter.split_text(document)
         texts.extend(splits)
     with st.spinner('Computing embeddings...'):
         embeddings_list = embeddings.embed_documents(texts)
-    return FAISS.from_embeddings(embeddings_list, texts)
+    # Using HNSWLib for fast retrieval
+    vector_store = HNSWLib.from_embeddings(embeddings=embeddings, texts=texts)
+    return vector_store
 
 # Function to save chat history to the database
 def save_chat_history(user_input, assistant_response):
@@ -83,7 +81,7 @@ def load_chat_history():
     return c.fetchall()
 
 # Streamlit app setup
-st.title("RAG Chatbot with Langchain, OpenAI, and Persistent Memory")
+st.title("Optimized RAG Chatbot with Local Embeddings and Vector Store")
 
 # Upload documents
 uploaded_files = st.file_uploader(
@@ -115,13 +113,15 @@ if uploaded_files:
     # Create or load vector store
     VECTOR_STORE_PATH = "vector_store"
     if os.path.exists(VECTOR_STORE_PATH):
-        vector_store = FAISS.load_local(VECTOR_STORE_PATH, embeddings)
+        # Load existing vector store
+        vector_store = HNSWLib.load_local(VECTOR_STORE_PATH, embeddings)
     else:
+        # Create a new vector store
         vector_store = create_vector_store(documents)
         vector_store.save_local(VECTOR_STORE_PATH)
 
     # Create conversational chain
-    retriever = vector_store.as_retriever(search_type="similarity")
+    retriever = vector_store.as_retriever(search_type="similarity", k=5)
     qa_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=retriever,
@@ -160,7 +160,7 @@ if uploaded_files:
     summarize_button = st.button("Summarize Documents")
 
     if summarize_button:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=8000, chunk_overlap=0)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         docs = text_splitter.create_documents(documents)
         summary_chain = load_summarize_chain(llm, chain_type="map_reduce")
         with st.spinner('Generating summary...'):
