@@ -4,7 +4,6 @@ import streamlit as st
 import sqlite3
 import logging
 import time
-import concurrent.futures
 
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
@@ -23,11 +22,10 @@ langchain.llm_cache = SQLiteCache(database_path=".langchain_cache.db")
 # Set API key using Streamlit secrets
 openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
 
-# Initialize Langchain components with batching enabled
+# Initialize Langchain components (no batch_size parameter here)
 embeddings = OpenAIEmbeddings(
     openai_api_key=openai_api_key,
-    model="text-embedding-ada-002",
-    batch_size=100  # Adjust the batch size as needed
+    model="text-embedding-ada-002"
 )
 
 llm = ChatOpenAI(
@@ -62,10 +60,6 @@ def load_document(file):
     else:
         return file.read().decode('utf-8')
 
-# Function to compute embeddings (for parallelization)
-def compute_embedding(text):
-    return embeddings.embed_query(text)
-
 # Function to create the FAISS vector store with optimizations
 def create_vector_store(documents):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=8000, chunk_overlap=0)
@@ -74,8 +68,7 @@ def create_vector_store(documents):
         splits = text_splitter.split_text(document)
         texts.extend(splits)
     with st.spinner('Computing embeddings...'):
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            embeddings_list = list(executor.map(compute_embedding, texts))
+        embeddings_list = embeddings.embed_documents(texts)
     return FAISS.from_embeddings(embeddings_list, texts)
 
 # Function to save chat history to the database
