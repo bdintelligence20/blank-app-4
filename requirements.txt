@@ -1,1 +1,8 @@
+pandas
 streamlit
+sqlite3
+langchain
+openai
+faiss-cpu
+pypdf
+PyYAML
