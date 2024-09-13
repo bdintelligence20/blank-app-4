@@ -1,8 +1,8 @@
-pandas
-streamlit
-sqlite3
-langchain
-openai
-faiss-cpu
-pypdf
-PyYAML
+streamlit==1.25.0
+pandas==2.1.0
+openai==0.27.6
+langchain==0.0.220
+faiss-cpu==1.7.4
+PyPDF2==3.0.1
+xlrd==2.0.1
+openpyxl==3.1.2
