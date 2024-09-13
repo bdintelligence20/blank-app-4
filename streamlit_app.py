@@ -3,6 +3,9 @@ import pandas as pd
 import streamlit as st
 import sqlite3
 import logging
+import time
+import concurrent.futures
+
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chat_models import ChatOpenAI
@@ -11,13 +14,20 @@ from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.summarize import load_summarize_chain
 
+from langchain.cache import SQLiteCache
+import langchain
+
+# Set up caching for embeddings to prevent redundant computations
+langchain.llm_cache = SQLiteCache(database_path=".langchain_cache.db")
+
 # Set API key using Streamlit secrets
 openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
 
-# Initialize Langchain components
+# Initialize Langchain components with batching enabled
 embeddings = OpenAIEmbeddings(
     openai_api_key=openai_api_key,
-    model="text-embedding-ada-002"
+    model="text-embedding-ada-002",
+    batch_size=100  # Adjust the batch size as needed
 )
 
 llm = ChatOpenAI(
@@ -36,14 +46,13 @@ c.execute('''CREATE TABLE IF NOT EXISTS chat_history
              (user_input TEXT, assistant_response TEXT)''')
 conn.commit()
 
-# Function to load documents (supports txt, pdf, csv, and xlsx files)
+# Function to load documents (optimized for large files)
 def load_document(file):
     file_extension = os.path.splitext(file.name)[1].lower()
     if file_extension == ".pdf":
-        from langchain.document_loaders import PyPDFLoader
-        loader = PyPDFLoader(file)
-        pages = loader.load()
-        return "\n".join([page.page_content for page in pages])
+        from PyPDF2 import PdfReader
+        reader = PdfReader(file)
+        return "\n".join(page.extract_text() for page in reader.pages)
     elif file_extension == ".csv":
         df = pd.read_csv(file)
         return df.to_string(index=False)
@@ -53,14 +62,21 @@ def load_document(file):
     else:
         return file.read().decode('utf-8')
 
-# Function to create the FAISS vector store
+# Function to compute embeddings (for parallelization)
+def compute_embedding(text):
+    return embeddings.embed_query(text)
+
+# Function to create the FAISS vector store with optimizations
 def create_vector_store(documents):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=8000, chunk_overlap=0)
     texts = []
     for document in documents:
         splits = text_splitter.split_text(document)
         texts.extend(splits)
-    return FAISS.from_texts(texts, embeddings)
+    with st.spinner('Computing embeddings...'):
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            embeddings_list = list(executor.map(compute_embedding, texts))
+    return FAISS.from_embeddings(embeddings_list, texts)
 
 # Function to save chat history to the database
 def save_chat_history(user_input, assistant_response):
@@ -100,8 +116,9 @@ prompt_template = PromptTemplate(
 # Chat functionality
 if uploaded_files:
     # Load and process documents
-    documents = [load_document(file) for file in uploaded_files]
-    
+    with st.spinner('Loading and processing documents...'):
+        documents = [load_document(file) for file in uploaded_files]
+
     # Create or load vector store
     VECTOR_STORE_PATH = "vector_store"
     if os.path.exists(VECTOR_STORE_PATH):
@@ -109,7 +126,7 @@ if uploaded_files:
     else:
         vector_store = create_vector_store(documents)
         vector_store.save_local(VECTOR_STORE_PATH)
-    
+
     # Create conversational chain
     retriever = vector_store.as_retriever(search_type="similarity")
     qa_chain = ConversationalRetrievalChain.from_llm(
@@ -150,9 +167,10 @@ if uploaded_files:
     summarize_button = st.button("Summarize Documents")
 
     if summarize_button:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=8000, chunk_overlap=0)
         docs = text_splitter.create_documents(documents)
         summary_chain = load_summarize_chain(llm, chain_type="map_reduce")
-        summary = summary_chain.run(docs)
+        with st.spinner('Generating summary...'):
+            summary = summary_chain.run(docs)
         st.write("Summary of uploaded documents:")
         st.write(summary)
