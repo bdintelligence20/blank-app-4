@@ -4,15 +4,16 @@ import streamlit as st
 import sqlite3
 import logging
 import torch
+import numpy as np
 
-from langchain_community.vectorstores import FAISS  # Updated import from langchain-community
+from langchain_community.vectorstores import FAISS  # Corrected import
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.summarize import load_summarize_chain
 
-from langchain.cache import SQLiteCache
+from langchain_community.cache import SQLiteCache  # Corrected import
 import langchain
 
 # Set up caching for embeddings to prevent redundant computations
@@ -39,6 +40,7 @@ class NVEmbedV2Embeddings(Embeddings):
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             with torch.no_grad():
                 outputs = self.model(**inputs)
+            # Pooling strategy: mean pooling over the token embeddings
             embeddings = outputs.last_hidden_state.mean(dim=1)
             all_embeddings.extend(embeddings.cpu().numpy())
         return all_embeddings
@@ -93,8 +95,8 @@ def create_vector_store(documents):
         texts.extend(splits)
     with st.spinner('Computing embeddings...'):
         embeddings_list = embeddings.embed_documents(texts)
-    # Using FAISS from langchain-community
-    vector_store = FAISS.from_embeddings(embeddings=embeddings_list, texts=texts)
+    # Using FAISS for the vector store
+    vector_store = FAISS.from_embeddings(embeddings_list, texts)
     return vector_store
 
 # Function to save chat history to the database
@@ -109,7 +111,7 @@ def load_chat_history():
     return c.fetchall()
 
 # Streamlit app setup
-st.title("Optimized RAG Chatbot with NVIDIA's NV-Embed-v2 and FAISS")
+st.title("Optimized RAG Chatbot with NVIDIA's NV-Embed-v2")
 
 # Upload documents
 uploaded_files = st.file_uploader(
