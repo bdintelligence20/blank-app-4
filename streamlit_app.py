@@ -5,7 +5,7 @@ import sqlite3
 import logging
 import torch
 
-from langchain.vectorstores import FAISS  # You can choose other vector stores if preferred
+from langchain_community.vectorstores import FAISS  # Updated import from langchain-community
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
@@ -93,8 +93,8 @@ def create_vector_store(documents):
         texts.extend(splits)
     with st.spinner('Computing embeddings...'):
         embeddings_list = embeddings.embed_documents(texts)
-    # Using FAISS for simplicity and compatibility
-    vector_store = FAISS.from_embeddings(embeddings_list, texts)
+    # Using FAISS from langchain-community
+    vector_store = FAISS.from_embeddings(embeddings=embeddings_list, texts=texts)
     return vector_store
 
 # Function to save chat history to the database
@@ -109,7 +109,7 @@ def load_chat_history():
     return c.fetchall()
 
 # Streamlit app setup
-st.title("Optimized RAG Chatbot with NVIDIA's NV-Embed-v2")
+st.title("Optimized RAG Chatbot with NVIDIA's NV-Embed-v2 and FAISS")
 
 # Upload documents
 uploaded_files = st.file_uploader(

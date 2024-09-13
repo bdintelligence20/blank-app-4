@@ -1,6 +1,7 @@
 streamlit
 pandas
 langchain>=0.0.208
+langchain-community
 transformers>=4.31.0
 sentence-transformers
 torch
@@ -8,3 +9,5 @@ faiss-cpu
 PyPDF2
 numpy
 scikit-learn
+typing-extensions
+tqdm
