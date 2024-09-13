@@ -3,9 +3,9 @@ import pandas as pd
 import streamlit as st
 import sqlite3
 import logging
+import torch
 
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import HNSWLib  # Replace with HyperDB if available
+from langchain.vectorstores import FAISS  # You can choose other vector stores if preferred
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
@@ -18,8 +18,36 @@ import langchain
 # Set up caching for embeddings to prevent redundant computations
 langchain.llm_cache = SQLiteCache(database_path=".langchain_cache.db")
 
-# Initialize embeddings using Hugging Face's 'all-MiniLM-L6-v2' model
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+# Custom Embeddings Class for NV-Embed-v2
+from langchain.embeddings.base import Embeddings
+from transformers import AutoTokenizer, AutoModel
+from typing import List
+
+class NVEmbedV2Embeddings(Embeddings):
+    def __init__(self, model_name: str = "nvidia/NV-Embed-v2"):
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = self.model.to(self.device)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        all_embeddings = []
+        batch_size = 16  # Adjust based on your system's capacity
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i+batch_size]
+            inputs = self.tokenizer(batch_texts, padding=True, truncation=True, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            embeddings = outputs.last_hidden_state.mean(dim=1)
+            all_embeddings.extend(embeddings.cpu().numpy())
+        return all_embeddings
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.embed_documents([text])[0]
+
+# Initialize embeddings using the custom class
+embeddings = NVEmbedV2Embeddings()
 
 # Initialize the language model (e.g., OpenAI's GPT-4)
 openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
@@ -65,8 +93,8 @@ def create_vector_store(documents):
         texts.extend(splits)
     with st.spinner('Computing embeddings...'):
         embeddings_list = embeddings.embed_documents(texts)
-    # Using HNSWLib for fast retrieval
-    vector_store = HNSWLib.from_embeddings(embeddings=embeddings, texts=texts)
+    # Using FAISS for simplicity and compatibility
+    vector_store = FAISS.from_embeddings(embeddings_list, texts)
     return vector_store
 
 # Function to save chat history to the database
@@ -81,7 +109,7 @@ def load_chat_history():
     return c.fetchall()
 
 # Streamlit app setup
-st.title("Optimized RAG Chatbot with Local Embeddings and Vector Store")
+st.title("Optimized RAG Chatbot with NVIDIA's NV-Embed-v2")
 
 # Upload documents
 uploaded_files = st.file_uploader(
@@ -114,7 +142,7 @@ if uploaded_files:
     VECTOR_STORE_PATH = "vector_store"
     if os.path.exists(VECTOR_STORE_PATH):
         # Load existing vector store
-        vector_store = HNSWLib.load_local(VECTOR_STORE_PATH, embeddings)
+        vector_store = FAISS.load_local(VECTOR_STORE_PATH, embeddings)
     else:
         # Create a new vector store
         vector_store = create_vector_store(documents)
