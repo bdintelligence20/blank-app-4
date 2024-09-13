@@ -5,7 +5,7 @@ import sqlite3
 import logging
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
-from langchain.llms import OpenAI
+from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -19,7 +19,8 @@ embeddings = OpenAIEmbeddings(
     openai_api_key=openai_api_key,
     model="text-embedding-ada-002"
 )
-llm = OpenAI(
+
+llm = ChatOpenAI(
     openai_api_key=openai_api_key,
     model_name="gpt-4",
     temperature=0.7,
